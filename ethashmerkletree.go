@@ -37,6 +37,7 @@ const (
 	NULL_VALUE         = "0x"
 	dataDir            = "./ethash-data"
 	zokratesName       = "test"
+	mtFileAppendix     = "_MERKLE_TREE"
 )
 
 type Merkletree struct {
@@ -47,6 +48,7 @@ type Merkletree struct {
 	elements      [][]byte
 	hashes        [][]byte
 	logger        zap.Logger
+	filePath      string
 }
 
 func New(dirPath string, blockNr int, isCache bool, threads int) *Merkletree {
@@ -66,6 +68,7 @@ func New(dirPath string, blockNr int, isCache bool, threads int) *Merkletree {
 	// 2. gather basic information about merkle tree
 	fileName := FileNameCreator(isCache, blockNr)
 	filePath := filepath.Join(dirPath, fileName)
+	mtFilePath := fmt.Sprintf("%s%s", filePath, mtFileAppendix)
 	sugar.Info(filePath)
 	fileStats, err := os.Stat(filePath)
 	if err != nil {
@@ -117,6 +120,7 @@ func New(dirPath string, blockNr int, isCache bool, threads int) *Merkletree {
 		elements:      elements,
 		hashes:        hashes,
 		logger:        *logger,
+		filePath:      mtFilePath,
 	}
 	// 6. create merkle tree
 	mt.HashValuesInMT(threads)
@@ -126,6 +130,15 @@ func New(dirPath string, blockNr int, isCache bool, threads int) *Merkletree {
 func (mt *Merkletree) HashValuesInMT(manualThreads int) {
 	sugar := mt.logger.Sugar()
 	start := time.Now()
+	// todo check if file is already there
+	fd, err := os.Open(mt.filePath)
+	if err == nil {
+		for i := 0; i < mt.nodeAmount; i++ {
+			fd.Read(mt.hashes[i])
+		}
+		sugar.Infow("Read merkle tree from file", "filepath", mt.filePath)
+		return
+	}
 	defer func() {
 		elapsed := time.Since(start)
 
@@ -272,7 +285,16 @@ func (mt *Merkletree) HashValuesInMT(manualThreads int) {
 			}
 		}
 	}
-	// todo write merkle tree to file.
+	fd, err = os.OpenFile(mt.filePath, os.O_WRONLY|os.O_CREATE, 0755)
+	if err != nil {
+		sugar.Errorw(err.Error())
+		panic(err.Error())
+	}
+	defer sugar.Infow("Wrote merkle tree to file", "filepath", mt.filePath)
+	defer fd.Close()
+	for i := 0; i < mt.nodeAmount; i++ {
+		fd.Write(mt.hashes[i])
+	}
 }
 
 func FileNameCreator(isCache bool, blockNr int) string {
