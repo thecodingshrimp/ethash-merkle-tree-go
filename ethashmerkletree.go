@@ -16,6 +16,7 @@ import (
 	"github.com/ethereum/go-ethereum/consensus/ethash"
 	"github.com/schollz/progressbar/v3"
 	"github.com/thecodingshrimp/pedersen-go"
+	"github.com/thecodingshrimp/pedersen-go/babyjub"
 	"go.uber.org/zap"
 )
 
@@ -147,7 +148,7 @@ func (mt *Merkletree) HashValuesInMT(manualThreads int) {
 		sugar.Errorw(err.Error())
 		return
 	}
-	NULL_HASH := pedersen.Compress_Zokrates(babyjubPoint)
+	NULL_HASH := babyjub.Compress_Zokrates(babyjubPoint)
 
 	// need threads to be = 2 ^ n for any n
 	threadHeight := math.Log2(float64(possThreads))
@@ -192,7 +193,7 @@ func (mt *Merkletree) HashValuesInMT(manualThreads int) {
 						sugar.Errorw(err.Error(), "threadId", id)
 						return
 					}
-					currHash = pedersen.Compress_Zokrates(babyjubPoint)
+					currHash = babyjub.Compress_Zokrates(babyjubPoint)
 					copy(mt.hashes[i], currHash[:])
 				} else {
 					// copy null hash without rehashing it.
@@ -223,7 +224,7 @@ func (mt *Merkletree) HashValuesInMT(manualThreads int) {
 							sugar.Errorw(err.Error(), "threadId", id)
 							return
 						}
-						currHash = pedersen.Compress_Zokrates(babyjubPoint)
+						currHash = babyjub.Compress_Zokrates(babyjubPoint)
 						copy(mt.hashes[j], currHash[:])
 					} else {
 						// copy null hash without rehashing it.
@@ -260,7 +261,7 @@ func (mt *Merkletree) HashValuesInMT(manualThreads int) {
 					sugar.Errorw(err.Error())
 					return
 				}
-				currHash = pedersen.Compress_Zokrates(babyjubPoint)
+				currHash = babyjub.Compress_Zokrates(babyjubPoint)
 				copy(mt.hashes[j], currHash[:])
 			} else {
 				// copy null hash without rehashing it.

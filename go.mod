@@ -5,7 +5,7 @@ go 1.18
 require (
 	github.com/ethereum/go-ethereum v1.10.16
 	github.com/schollz/progressbar/v3 v3.8.6
-	github.com/thecodingshrimp/pedersen-go v0.0.0-20220320181346-4ba920d9bd86
+	github.com/thecodingshrimp/pedersen-go v0.0.0-20220321122653-9ac6c147e4c4
 	go.uber.org/zap v1.21.0
 )
 
