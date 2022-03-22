@@ -42,20 +42,20 @@ const (
 )
 
 type MerkleTree struct {
-	elementAmount int
-	height        int
-	leafAmount    int
-	nodeAmount    int
-	elements      [][]byte
-	hashes        [][]byte
+	ElementAmount int
+	Height        int
+	LeafAmount    int
+	NodeAmount    int
+	Elements      [][]byte
+	Hashes        [][]byte
 	logger        zap.Logger
-	filePath      string
+	FilePath      string
 }
 
 type MerkleProof struct {
-	proof  [][]byte
-	value  []byte
-	index  int
+	Proof  [][]byte
+	Value  []byte
+	Index  int
 	logger zap.Logger
 	// hasher function for validation function (if I try MiMC as well next to pedersen hash)
 }
@@ -63,9 +63,9 @@ type MerkleProof struct {
 func NewMerkleProof(value []byte, index int, proof [][]byte) *MerkleProof {
 	logger, _ := zap.NewProduction()
 	return &MerkleProof{
-		value:  value,
-		index:  index,
-		proof:  proof,
+		Value:  value,
+		Index:  index,
+		Proof:  proof,
 		logger: *logger,
 	}
 }
@@ -73,19 +73,19 @@ func NewMerkleProof(value []byte, index int, proof [][]byte) *MerkleProof {
 func (mp *MerkleProof) validate(root []byte) bool {
 	pedersenHasher := pedersen.New(zokratesName, 171)
 	sugar := mp.logger.Sugar()
-	currPoint, err := pedersenHasher.PedersenHashBytes(mp.value)
+	currPoint, err := pedersenHasher.PedersenHashBytes(mp.Value)
 	if err != nil {
 		sugar.Errorw(err.Error())
 		return false
 	}
 	currHash := babyjub.Compress_Zokrates(currPoint)
-	for i := 0; i < len(mp.proof); i++ {
-		currBit := mp.index >> i & 1
+	for i := 0; i < len(mp.Proof); i++ {
+		currBit := mp.Index >> i & 1
 		switch currBit {
 		case 1:
-			currPoint, err = pedersenHasher.PedersenHashBytes(mp.proof[len(mp.proof)-i-1], currHash[:])
+			currPoint, err = pedersenHasher.PedersenHashBytes(mp.Proof[len(mp.Proof)-i-1], currHash[:])
 		default:
-			currPoint, err = pedersenHasher.PedersenHashBytes(currHash[:], mp.proof[len(mp.proof)-i-1])
+			currPoint, err = pedersenHasher.PedersenHashBytes(currHash[:], mp.Proof[len(mp.Proof)-i-1])
 		}
 		if err != nil {
 			sugar.Errorw(err.Error())
@@ -158,14 +158,14 @@ func NewMerkleTree(dirPath string, blockNr int, isCache bool, threads int) *Merk
 	}
 	// 5. init merkle tree
 	mt := MerkleTree{
-		elementAmount: elementAmount,
-		leafAmount:    leafAmount,
-		nodeAmount:    nodeAmount,
-		height:        height,
-		elements:      elements,
-		hashes:        hashes,
+		ElementAmount: elementAmount,
+		LeafAmount:    leafAmount,
+		NodeAmount:    nodeAmount,
+		Height:        height,
+		Elements:      elements,
+		Hashes:        hashes,
 		logger:        *logger,
-		filePath:      mtFilePath,
+		FilePath:      mtFilePath,
 	}
 	// 6. create merkle tree
 	mt.HashValuesInMT(threads)
@@ -175,13 +175,12 @@ func NewMerkleTree(dirPath string, blockNr int, isCache bool, threads int) *Merk
 func (mt *MerkleTree) HashValuesInMT(manualThreads int) {
 	sugar := mt.logger.Sugar()
 	start := time.Now()
-	// todo check if file is already there
-	fd, err := os.Open(mt.filePath)
+	fd, err := os.Open(mt.FilePath)
 	if err == nil {
-		for i := 0; i < mt.nodeAmount; i++ {
-			fd.Read(mt.hashes[i])
+		for i := 0; i < mt.NodeAmount; i++ {
+			fd.Read(mt.Hashes[i])
 		}
-		sugar.Infow("Read merkle tree from file", "filepath", mt.filePath)
+		sugar.Infow("Read merkle tree from file", "filepath", mt.FilePath)
 		return
 	}
 	defer func() {
@@ -225,37 +224,37 @@ func (mt *MerkleTree) HashValuesInMT(manualThreads int) {
 	pend.Add(int(threads))
 
 	var progress uint64
-	bar := progressbar.Default(int64(mt.nodeAmount))
+	bar := progressbar.Default(int64(mt.NodeAmount))
 	// Calculate the dataset segment
-	percent := uint64(math.Ceil(float64(mt.nodeAmount) / 100))
+	percent := uint64(math.Ceil(float64(mt.NodeAmount) / 100))
 	for i := 0; i < int(threads); i++ {
 		go func(id int) {
 			defer sugar.Infow("thread done.", "threadId", id)
 			defer pend.Done()
 			pedersenHasher := pedersen.New(zokratesName, 171)
 			var currHash [32]byte
-			batch := mt.leafAmount / int(threads)
+			batch := mt.LeafAmount / int(threads)
 
 			// initial walk through the leafs
-			first := mt.leafAmount + (id * batch) - 1
+			first := mt.LeafAmount + (id * batch) - 1
 			limit := first + batch
-			if limit > mt.nodeAmount {
-				limit = mt.nodeAmount
+			if limit > mt.NodeAmount {
+				limit = mt.NodeAmount
 			}
 			// todo outsource loop into its own function
 			for i := first; i < limit; i++ {
-				if i < mt.leafAmount+mt.elementAmount-1 {
+				if i < mt.LeafAmount+mt.ElementAmount-1 {
 					// hardcoded zokratesName. If really used, change to seedhash maybe
-					babyjubPoint, err := pedersenHasher.PedersenHashBytes(mt.elements[i%(mt.leafAmount-1)])
+					babyjubPoint, err := pedersenHasher.PedersenHashBytes(mt.Elements[i%(mt.LeafAmount-1)])
 					if err != nil {
 						sugar.Errorw(err.Error(), "threadId", id)
 						return
 					}
 					currHash = babyjub.Compress_Zokrates(babyjubPoint)
-					copy(mt.hashes[i], currHash[:])
+					copy(mt.Hashes[i], currHash[:])
 				} else {
 					// copy null hash without rehashing it.
-					copy(mt.hashes[i], NULL_HASH[:])
+					copy(mt.Hashes[i], NULL_HASH[:])
 				}
 				if status := atomic.AddUint64(&progress, 1); status%percent == 0 {
 					bar.Add(int(percent))
@@ -265,7 +264,7 @@ func (mt *MerkleTree) HashValuesInMT(manualThreads int) {
 			var firstThreadNodeAtHeight, currNodeAmount, nodeAmountAtHeight int
 			var leftHash []byte
 			var rightHash []byte
-			for i := mt.height - 1; i > int(threadHeight); i-- {
+			for i := mt.Height - 1; i > int(threadHeight); i-- {
 				nodeAmountAtHeight = int(math.Pow(2, float64(i-1)))
 				currNodeAmount = nodeAmountAtHeight / int(threads)
 				firstThreadNodeAtHeight = nodeAmountAtHeight + (id * currNodeAmount) - 1
@@ -274,8 +273,8 @@ func (mt *MerkleTree) HashValuesInMT(manualThreads int) {
 					limit = heightLimit
 				}
 				for j := firstThreadNodeAtHeight; j < limit; j++ {
-					leftHash = mt.hashes[j*2+1]
-					rightHash = mt.hashes[j*2+2]
+					leftHash = mt.Hashes[j*2+1]
+					rightHash = mt.Hashes[j*2+2]
 					if bytes.Compare(leftHash, NULL_HASH[:]) != 0 || bytes.Compare(rightHash, NULL_HASH[:]) != 0 {
 						babyjubPoint, err := pedersenHasher.PedersenHashBytes(leftHash, rightHash)
 						if err != nil {
@@ -283,10 +282,10 @@ func (mt *MerkleTree) HashValuesInMT(manualThreads int) {
 							return
 						}
 						currHash = babyjub.Compress_Zokrates(babyjubPoint)
-						copy(mt.hashes[j], currHash[:])
+						copy(mt.Hashes[j], currHash[:])
 					} else {
 						// copy null hash without rehashing it.
-						copy(mt.hashes[j], NULL_HASH[:])
+						copy(mt.Hashes[j], NULL_HASH[:])
 					}
 					if status := atomic.AddUint64(&progress, 1); status%percent == 0 {
 						bar.Add(int(percent))
@@ -311,8 +310,8 @@ func (mt *MerkleTree) HashValuesInMT(manualThreads int) {
 			limit = heightLimit
 		}
 		for j := firstNodeAtHeight; j < limit; j++ {
-			leftHash = mt.hashes[j*2+1]
-			rightHash = mt.hashes[j*2+2]
+			leftHash = mt.Hashes[j*2+1]
+			rightHash = mt.Hashes[j*2+2]
 			if bytes.Compare(leftHash, NULL_HASH[:]) != 0 || bytes.Compare(rightHash, NULL_HASH[:]) != 0 {
 				babyjubPoint, err := pedersenHasher.PedersenHashBytes(leftHash, rightHash)
 				if err != nil {
@@ -320,30 +319,30 @@ func (mt *MerkleTree) HashValuesInMT(manualThreads int) {
 					return
 				}
 				currHash = babyjub.Compress_Zokrates(babyjubPoint)
-				copy(mt.hashes[j], currHash[:])
+				copy(mt.Hashes[j], currHash[:])
 			} else {
 				// copy null hash without rehashing it.
-				copy(mt.hashes[j], NULL_HASH[:])
+				copy(mt.Hashes[j], NULL_HASH[:])
 			}
 			if status := atomic.AddUint64(&progress, 1); status%percent == 0 {
 				bar.Add(int(percent))
 			}
 		}
 	}
-	fd, err = os.OpenFile(mt.filePath, os.O_WRONLY|os.O_CREATE, 0755)
+	fd, err = os.OpenFile(mt.FilePath, os.O_WRONLY|os.O_CREATE, 0755)
 	if err != nil {
 		sugar.Errorw(err.Error())
 		panic(err.Error())
 	}
-	defer sugar.Infow("Wrote merkle tree to file", "filepath", mt.filePath)
+	defer sugar.Infow("Wrote merkle tree to file", "filepath", mt.FilePath)
 	defer fd.Close()
-	for i := 0; i < mt.nodeAmount; i++ {
-		fd.Write(mt.hashes[i])
+	for i := 0; i < mt.NodeAmount; i++ {
+		fd.Write(mt.Hashes[i])
 	}
 }
 
 func (mt *MerkleTree) GetElementIndex(value []byte) int {
-	for i, element := range mt.elements {
+	for i, element := range mt.Elements {
 		if bytes.Equal(element, value) {
 			return i
 		}
@@ -355,21 +354,21 @@ func (mt *MerkleTree) GetHashIndex(value []byte) int {
 	elementIndex := mt.GetElementIndex(value)
 	if elementIndex < 0 {
 		// maybe we were given a hashValue
-		for i, hashValue := range mt.hashes {
+		for i, hashValue := range mt.Hashes {
 			if bytes.Equal(hashValue, value) {
 				return i
 			}
 		}
 		return -1
 	}
-	return elementIndex + mt.leafAmount - 1
+	return elementIndex + mt.LeafAmount - 1
 }
 
 func (mt *MerkleTree) GetHashValueByElementIndex(index int) ([]byte, error) {
-	if mt.nodeAmount <= index+mt.leafAmount-1 {
-		return nil, errors.New("index not in hashes slices.")
+	if mt.NodeAmount <= index+mt.LeafAmount-1 {
+		return nil, errors.New("index not in Hashes slices.")
 	}
-	return mt.hashes[index+mt.leafAmount-1], nil
+	return mt.Hashes[index+mt.LeafAmount-1], nil
 }
 
 func (mt *MerkleTree) GetNodePathByValue(value []byte) []int {
@@ -381,9 +380,9 @@ func (mt *MerkleTree) GetNodePathByIndex(index int) []int {
 }
 
 func (mt *MerkleTree) BuildNodePath(index int) []int {
-	path := make([]int, mt.height)
+	path := make([]int, mt.Height)
 	currIndex := index
-	for i := mt.height - 1; i >= 0; i-- {
+	for i := mt.Height - 1; i >= 0; i-- {
 		path[i] = currIndex
 		currIndex = int(currIndex/2) - (1 - (currIndex % 2))
 	}
@@ -391,7 +390,7 @@ func (mt *MerkleTree) BuildNodePath(index int) []int {
 }
 
 func (mt *MerkleTree) GetProofByElementIndex(index int) ([][]byte, error) {
-	return mt.BuildProof(mt.GetNodePathByIndex(index + mt.leafAmount - 1))
+	return mt.BuildProof(mt.GetNodePathByIndex(index + mt.LeafAmount - 1))
 }
 
 func (mt *MerkleTree) GetProofByElementValue(value []byte) ([][]byte, error) {
@@ -399,8 +398,8 @@ func (mt *MerkleTree) GetProofByElementValue(value []byte) ([][]byte, error) {
 }
 
 func (mt *MerkleTree) BuildProof(nodePath []int) ([][]byte, error) {
-	proof := make([][]byte, mt.height-1)
-	proofStorage := make([]byte, (mt.height-1)*pedersenHashBytes)
+	proof := make([][]byte, mt.Height-1)
+	proofStorage := make([]byte, (mt.Height-1)*pedersenHashBytes)
 	for i := range proof {
 		proof[i], proofStorage = proofStorage[:pedersenHashBytes], proofStorage[pedersenHashBytes:]
 	}
@@ -408,9 +407,9 @@ func (mt *MerkleTree) BuildProof(nodePath []int) ([][]byte, error) {
 	for i := len(nodePath) - 1; i > 0; i-- {
 		switch nodePath[i] % 2 {
 		case 0:
-			proof[i-1] = mt.hashes[nodePath[i]-1]
+			proof[i-1] = mt.Hashes[nodePath[i]-1]
 		default:
-			proof[i-1] = mt.hashes[nodePath[i]+1]
+			proof[i-1] = mt.Hashes[nodePath[i]+1]
 		}
 	}
 	return proof, nil

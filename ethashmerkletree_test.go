@@ -1,37 +1,30 @@
 package ethashmerkletree
 
 import (
-	"encoding/hex"
 	"fmt"
-	"math/big"
 	"testing"
+	"time"
 
-	"github.com/iden3/go-iden3-crypto/mimc7"
 	"github.com/stretchr/testify/assert"
 )
 
-func TestInitMerkleTree(t *testing.T) {
-	// todo remove merkle tree
-	merkleTree := NewMerkleTree("./ethash-data", 30000, true, 16)
-	merkleTree.elements = nil
-	fmt.Println(hex.EncodeToString(merkleTree.hashes[0]))
-	merkleTree.hashes = nil
-	fmt.Println(merkleTree)
-}
+// func TestInitMerkleTree(t *testing.T) {
+// 	// todo remove merkle tree
+// 	merkleTree := NewMerkleTree("./ethash-data", 30000, false, 16)
+// 	merkleTree.Elements = nil
+// 	fmt.Println(hex.EncodeToString(merkleTree.Hashes[0]))
+// 	merkleTree.Hashes = nil
+// 	fmt.Println(merkleTree)
+// }
 
 func TestMerkleProofValidation(t *testing.T) {
-	merkleTree := NewMerkleTree("./ethash-data", 30000, true, 16)
+	merkleTree := NewMerkleTree("./ethash-data", 30000, false, 16)
 	index := 200000
+	start := time.Now()
 	proof, err := merkleTree.GetProofByElementIndex(index)
 	assert.Nil(t, err)
-	merkleProof := NewMerkleProof(merkleTree.elements[index], index, proof)
-	assert.True(t, merkleProof.validate(merkleTree.hashes[0]))
+	merkleProof := NewMerkleProof(merkleTree.Elements[index], index, proof)
+	assert.True(t, merkleProof.validate(merkleTree.Hashes[0]))
+	fmt.Println("proof took", time.Since(start))
 	// todo remove merkle tree
-}
-
-func TestComething(t *testing.T) {
-	test := mimc7.MIMC7Hash(big.NewInt(0), big.NewInt(0))
-	fmt.Println(test.Text(10))
-	test = mimc7.MIMC7HashGeneric(big.NewInt(0), big.NewInt(0), 10)
-	fmt.Println(test.Text(10))
 }
