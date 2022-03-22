@@ -3,6 +3,7 @@ package ethashmerkletree
 import (
 	"bytes"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"math"
 	"os"
@@ -40,7 +41,7 @@ const (
 	mtFileAppendix     = "_MERKLE_TREE"
 )
 
-type Merkletree struct {
+type MerkleTree struct {
 	elementAmount int
 	height        int
 	leafAmount    int
@@ -51,7 +52,51 @@ type Merkletree struct {
 	filePath      string
 }
 
-func New(dirPath string, blockNr int, isCache bool, threads int) *Merkletree {
+type MerkleProof struct {
+	proof  [][]byte
+	value  []byte
+	index  int
+	logger zap.Logger
+	// hasher function for validation function (if I try MiMC as well next to pedersen hash)
+}
+
+func NewMerkleProof(value []byte, index int, proof [][]byte) *MerkleProof {
+	logger, _ := zap.NewProduction()
+	return &MerkleProof{
+		value:  value,
+		index:  index,
+		proof:  proof,
+		logger: *logger,
+	}
+}
+
+func (mp *MerkleProof) validate(root []byte) bool {
+	pedersenHasher := pedersen.New(zokratesName, 171)
+	sugar := mp.logger.Sugar()
+	currPoint, err := pedersenHasher.PedersenHashBytes(mp.value)
+	if err != nil {
+		sugar.Errorw(err.Error())
+		return false
+	}
+	currHash := babyjub.Compress_Zokrates(currPoint)
+	for i := 0; i < len(mp.proof); i++ {
+		currBit := mp.index >> i & 1
+		switch currBit {
+		case 1:
+			currPoint, err = pedersenHasher.PedersenHashBytes(mp.proof[len(mp.proof)-i-1], currHash[:])
+		default:
+			currPoint, err = pedersenHasher.PedersenHashBytes(currHash[:], mp.proof[len(mp.proof)-i-1])
+		}
+		if err != nil {
+			sugar.Errorw(err.Error())
+			return false
+		}
+		currHash = babyjub.Compress_Zokrates(currPoint)
+	}
+	return bytes.Compare(root, currHash[:]) == 0
+}
+
+func NewMerkleTree(dirPath string, blockNr int, isCache bool, threads int) *MerkleTree {
 	logger, _ := zap.NewProduction()
 	defer logger.Sync()
 	sugar := logger.Sugar()
@@ -73,7 +118,7 @@ func New(dirPath string, blockNr int, isCache bool, threads int) *Merkletree {
 	fileStats, err := os.Stat(filePath)
 	if err != nil {
 		sugar.Errorw(err.Error())
-		return &Merkletree{}
+		return &MerkleTree{}
 	}
 	elementAmount := int((fileStats.Size() - 8)) / hashBytes
 	// elementAmount := int(128 % fileStats.Size())
@@ -92,7 +137,7 @@ func New(dirPath string, blockNr int, isCache bool, threads int) *Merkletree {
 	fd, err := os.Open(filePath)
 	if err != nil {
 		sugar.Errorw(err.Error())
-		return &Merkletree{}
+		return &MerkleTree{}
 	}
 	// jumping over magic number
 	fd.Seek(8, 0)
@@ -100,7 +145,7 @@ func New(dirPath string, blockNr int, isCache bool, threads int) *Merkletree {
 		_, err := fd.Read(elements[i])
 		if err != nil {
 			sugar.Errorw(err.Error())
-			return &Merkletree{}
+			return &MerkleTree{}
 		}
 	}
 
@@ -112,7 +157,7 @@ func New(dirPath string, blockNr int, isCache bool, threads int) *Merkletree {
 		hashes[i], hashStorage = hashStorage[:pedersenHashBytes], hashStorage[pedersenHashBytes:]
 	}
 	// 5. init merkle tree
-	mt := Merkletree{
+	mt := MerkleTree{
 		elementAmount: elementAmount,
 		leafAmount:    leafAmount,
 		nodeAmount:    nodeAmount,
@@ -127,7 +172,7 @@ func New(dirPath string, blockNr int, isCache bool, threads int) *Merkletree {
 	return &mt
 }
 
-func (mt *Merkletree) HashValuesInMT(manualThreads int) {
+func (mt *MerkleTree) HashValuesInMT(manualThreads int) {
 	sugar := mt.logger.Sugar()
 	start := time.Now()
 	// todo check if file is already there
@@ -295,6 +340,80 @@ func (mt *Merkletree) HashValuesInMT(manualThreads int) {
 	for i := 0; i < mt.nodeAmount; i++ {
 		fd.Write(mt.hashes[i])
 	}
+}
+
+func (mt *MerkleTree) GetElementIndex(value []byte) int {
+	for i, element := range mt.elements {
+		if bytes.Equal(element, value) {
+			return i
+		}
+	}
+	return -1
+}
+
+func (mt *MerkleTree) GetHashIndex(value []byte) int {
+	elementIndex := mt.GetElementIndex(value)
+	if elementIndex < 0 {
+		// maybe we were given a hashValue
+		for i, hashValue := range mt.hashes {
+			if bytes.Equal(hashValue, value) {
+				return i
+			}
+		}
+		return -1
+	}
+	return elementIndex + mt.leafAmount - 1
+}
+
+func (mt *MerkleTree) GetHashValueByElementIndex(index int) ([]byte, error) {
+	if mt.nodeAmount <= index+mt.leafAmount-1 {
+		return nil, errors.New("index not in hashes slices.")
+	}
+	return mt.hashes[index+mt.leafAmount-1], nil
+}
+
+func (mt *MerkleTree) GetNodePathByValue(value []byte) []int {
+	return mt.BuildNodePath(mt.GetHashIndex(value))
+}
+
+func (mt *MerkleTree) GetNodePathByIndex(index int) []int {
+	return mt.BuildNodePath(index)
+}
+
+func (mt *MerkleTree) BuildNodePath(index int) []int {
+	path := make([]int, mt.height)
+	currIndex := index
+	for i := mt.height - 1; i >= 0; i-- {
+		path[i] = currIndex
+		currIndex = int(currIndex/2) - (1 - (currIndex % 2))
+	}
+	return path
+}
+
+func (mt *MerkleTree) GetProofByElementIndex(index int) ([][]byte, error) {
+	return mt.BuildProof(mt.GetNodePathByIndex(index + mt.leafAmount - 1))
+}
+
+func (mt *MerkleTree) GetProofByElementValue(value []byte) ([][]byte, error) {
+	return mt.BuildProof(mt.GetNodePathByValue(value))
+}
+
+func (mt *MerkleTree) BuildProof(nodePath []int) ([][]byte, error) {
+	proof := make([][]byte, mt.height-1)
+	proofStorage := make([]byte, (mt.height-1)*pedersenHashBytes)
+	for i := range proof {
+		proof[i], proofStorage = proofStorage[:pedersenHashBytes], proofStorage[pedersenHashBytes:]
+	}
+
+	for i := len(nodePath) - 1; i > 0; i-- {
+		switch nodePath[i] % 2 {
+		case 0:
+			proof[i-1] = mt.hashes[nodePath[i]-1]
+		default:
+			proof[i-1] = mt.hashes[nodePath[i]+1]
+		}
+	}
+	return proof, nil
 }
 
 func FileNameCreator(isCache bool, blockNr int) string {
