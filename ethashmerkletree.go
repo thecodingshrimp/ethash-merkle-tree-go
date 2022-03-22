@@ -70,7 +70,7 @@ func NewMerkleProof(value []byte, index int, proof [][]byte) *MerkleProof {
 	}
 }
 
-func (mp *MerkleProof) validate(root []byte) bool {
+func (mp *MerkleProof) Validate(root []byte) bool {
 	pedersenHasher := pedersen.New(zokratesName, 171)
 	sugar := mp.logger.Sugar()
 	currPoint, err := pedersenHasher.PedersenHashBytes(mp.Value)
