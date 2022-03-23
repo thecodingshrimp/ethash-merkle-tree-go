@@ -121,7 +121,7 @@ func NewMerkleTree(dirPath string, blockNr int, isCache bool, threads int) *Merk
 		return &MerkleTree{}
 	}
 	elementAmount := int((fileStats.Size() - 8)) / hashBytes
-	// elementAmount := int(128 % fileStats.Size())
+	// elementAmount := int(1024 % fileStats.Size())
 	height := FindMtHeight(elementAmount)
 	leafAmount := int(math.Pow(2, float64(height-1)))
 	nodeAmount := int(math.Pow(2, float64(height)) - 1)
@@ -130,9 +130,6 @@ func NewMerkleTree(dirPath string, blockNr int, isCache bool, threads int) *Merk
 	// allocating space for elements in a 2D slice
 	elements := make([][]byte, elementAmount)
 	elementStorage := make([]byte, elementAmount*hashBytes)
-	for i := range elements {
-		elements[i], elementStorage = elementStorage[:hashBytes], elementStorage[hashBytes:]
-	}
 	// filling elements array
 	fd, err := os.Open(filePath)
 	if err != nil {
@@ -141,33 +138,29 @@ func NewMerkleTree(dirPath string, blockNr int, isCache bool, threads int) *Merk
 	}
 	// jumping over magic number
 	fd.Seek(8, 0)
+	// read everything in one go into elementstorage
+	currPointer := 0
+	var read int
+	for moreToRead := true; moreToRead; moreToRead = read > 0 {
+		read, _ = fd.Read(elementStorage[currPointer:])
+		currPointer += read
+	}
 	for i := range elements {
-		_, err := fd.Read(elements[i])
-		if err != nil {
-			sugar.Errorw(err.Error())
-			return &MerkleTree{}
-		}
+		elements[i], elementStorage = elementStorage[:hashBytes], elementStorage[hashBytes:]
 	}
 
-	// 4. creating merkle tree array
 	// allocating space for hashes in a 2D slice
-	hashes := make([][]byte, nodeAmount)
-	hashStorage := make([]byte, nodeAmount*(pedersenHashBytes))
-	for i := range hashes {
-		hashes[i], hashStorage = hashStorage[:pedersenHashBytes], hashStorage[pedersenHashBytes:]
-	}
-	// 5. init merkle tree
+	// 4. init merkle tree
 	mt := MerkleTree{
 		ElementAmount: elementAmount,
 		LeafAmount:    leafAmount,
 		NodeAmount:    nodeAmount,
 		Height:        height,
 		Elements:      elements,
-		Hashes:        hashes,
 		logger:        *logger,
 		FilePath:      mtFilePath,
 	}
-	// 6. create merkle tree
+	// 5. create merkle tree
 	mt.HashValuesInMT(threads)
 	return &mt
 }
@@ -175,12 +168,28 @@ func NewMerkleTree(dirPath string, blockNr int, isCache bool, threads int) *Merk
 func (mt *MerkleTree) HashValuesInMT(manualThreads int) {
 	sugar := mt.logger.Sugar()
 	start := time.Now()
+
+	// create hash storage space
+	hashes := make([][]byte, mt.NodeAmount)
+	hashStorage := make([]byte, mt.NodeAmount*(pedersenHashBytes))
+	// keeping this pointer in case of writing to file
+	storagePointer := hashStorage
 	fd, err := os.Open(mt.FilePath)
 	if err == nil {
-		for i := 0; i < mt.NodeAmount; i++ {
-			fd.Read(mt.Hashes[i])
+		currPointer := 0
+		var read int
+		for moreToRead := true; moreToRead; moreToRead = read > 0 {
+			read, _ = fd.Read(hashStorage[currPointer:])
+			currPointer += read
 		}
 		sugar.Infow("Read merkle tree from file", "filepath", mt.FilePath)
+	}
+	for i := range hashes {
+		hashes[i], hashStorage = hashStorage[:pedersenHashBytes], hashStorage[pedersenHashBytes:]
+	}
+	mt.Hashes = hashes
+	if err == nil {
+		fd.Close()
 		return
 	}
 	defer func() {
@@ -192,7 +201,6 @@ func (mt *MerkleTree) HashValuesInMT(manualThreads int) {
 		}
 		logFn("Generated Ethash Merkle Tree", "elapsed", common.PrettyDuration(elapsed))
 	}()
-	// todo load from file if already generated
 
 	// Generate the merkle tree on many goroutines since it takes a while
 	possThreads := runtime.NumCPU()
@@ -336,8 +344,10 @@ func (mt *MerkleTree) HashValuesInMT(manualThreads int) {
 	}
 	defer sugar.Infow("Wrote merkle tree to file", "filepath", mt.FilePath)
 	defer fd.Close()
-	for i := 0; i < mt.NodeAmount; i++ {
-		fd.Write(mt.Hashes[i])
+	currByteAmount := 0
+	for moreToWrite := true; moreToWrite; moreToWrite = currByteAmount < len(storagePointer) {
+		written, _ := fd.Write(storagePointer[currByteAmount:])
+		currByteAmount += written
 	}
 }
 
