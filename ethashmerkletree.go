@@ -120,7 +120,9 @@ func NewMerkleTree(dirPath string, blockNr int, isCache bool, threads int) *Merk
 		sugar.Errorw(err.Error())
 		return &MerkleTree{}
 	}
+	// ACTUAL TODO divide by 2 since whole datasetitem (128 bytes) will be saved in leaf instead of 64 bytes
 	elementAmount := int((fileStats.Size() - 8)) / hashBytes
+
 	// elementAmount := int(1024 % fileStats.Size())
 	height := FindMtHeight(elementAmount)
 	leafAmount := int(math.Pow(2, float64(height-1)))
@@ -250,6 +252,7 @@ func (mt *MerkleTree) HashValuesInMT(manualThreads int) {
 				limit = mt.NodeAmount
 			}
 			// todo outsource loop into its own function
+			// ACTUAL TODO hash the whole datasetitem (128 bytes) into one leaf
 			for i := first; i < limit; i++ {
 				if i < mt.LeafAmount+mt.ElementAmount-1 {
 					// hardcoded zokratesName. If really used, change to seedhash maybe
