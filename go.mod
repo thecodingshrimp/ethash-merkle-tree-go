@@ -4,7 +4,6 @@ go 1.18
 
 require (
 	github.com/ethereum/go-ethereum v1.10.16
-	github.com/iden3/go-iden3-crypto v0.0.13
 	github.com/schollz/progressbar/v3 v3.8.6
 	github.com/stretchr/testify v1.7.0
 	github.com/thecodingshrimp/pedersen-go v0.0.0-20220321122653-9ac6c147e4c4
@@ -26,6 +25,7 @@ require (
 	github.com/hashicorp/golang-lru v0.5.5-0.20210104140557-80c98217689d // indirect
 	github.com/holiman/bloomfilter/v2 v2.0.3 // indirect
 	github.com/holiman/uint256 v1.2.0 // indirect
+	github.com/iden3/go-iden3-crypto v0.0.13 // indirect
 	github.com/mattn/go-runewidth v0.0.13 // indirect
 	github.com/mitchellh/colorstring v0.0.0-20190213212951-d06e56a500db // indirect
 	github.com/olekukonko/tablewriter v0.0.5 // indirect
