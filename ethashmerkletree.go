@@ -106,8 +106,7 @@ func (mp *MerkleProof) Validate(root []byte) bool {
 	return bytes.Compare(root, currHash[:]) == 0
 }
 
-func NewMerkleTree(dirPath string, blockNr int, isCache bool, threads int) *MerkleTree {
-	logger, _ := zap.NewProduction()
+func NewMerkleTree(dirPath string, blockNr int, isCache bool, threads int, logger *zap.Logger) *MerkleTree {
 	defer logger.Sync()
 	sugar := logger.Sugar()
 	// 1. generate data if its not there
@@ -124,7 +123,7 @@ func NewMerkleTree(dirPath string, blockNr int, isCache bool, threads int) *Merk
 	fileName := FileNameCreator(isCache, blockNr)
 	filePath := filepath.Join(dirPath, fileName)
 	mtFilePath := fmt.Sprintf("%s%s", filePath, mtFileAppendix)
-	sugar.Info(filePath)
+	sugar.Debug(filePath)
 	fileStats, err := os.Stat(filePath)
 	if err != nil {
 		sugar.Errorw(err.Error())
@@ -183,6 +182,7 @@ func NewMerkleTree(dirPath string, blockNr int, isCache bool, threads int) *Merk
 		FilePath:               mtFilePath,
 		isCache:                isCache,
 	}
+	sugar.Infow("General Merkle Tree information", "elementAmount", elementAmount, "leafAmount", leafAmount, "nodeAmount", nodeAmount, "height", height, "isCache", isCache)
 	// 5. create merkle tree
 	mt.HashValuesInMT(threads)
 	return &mt
@@ -260,7 +260,8 @@ func (mt *MerkleTree) HashValuesInMT(manualThreads int) {
 	percent := uint64(math.Ceil(float64(mt.NodeAmount) / 100))
 	for i := 0; i < int(threads); i++ {
 		go func(id int) {
-			defer sugar.Infow("thread done.", "threadId", id)
+			sugar.Debugw("Starting thread", "id", id)
+			defer sugar.Debugw("Thread done.", "threadId", id)
 			defer pend.Done()
 			pedersenHasher := pedersen.New(zokratesName, 171)
 			var currHash [32]byte
@@ -274,6 +275,7 @@ func (mt *MerkleTree) HashValuesInMT(manualThreads int) {
 			}
 			var hashIndex int
 			// todo outsource loop into its own function
+			sugar.Debugw("Starting walk through leafs", "thread_id", id, "first", first, "limit", limit)
 			for i := first; i < limit; i++ {
 				if !mt.isCache {
 					// if not cache, i += 2 each iteration
@@ -318,11 +320,12 @@ func (mt *MerkleTree) HashValuesInMT(manualThreads int) {
 					bar.Add(int(percent))
 				}
 			}
-			sugar.Infow("Leafs done.", "threadId", id, "start", first, "finish", limit)
+			sugar.Debugw("Leafs done.", "threadId", id, "start", first, "finish", limit)
 			// inside of the tree
 			var firstThreadNodeAtHeight, currNodeAmount, nodeAmountAtHeight int
 			var leftHash []byte
 			var rightHash []byte
+			sugar.Debugw("Starting walk through inner nodes", "threadId", id)
 			for i := mt.Height - 1; i > int(threadHeight); i-- {
 				nodeAmountAtHeight = int(math.Pow(2, float64(i-1)))
 				currNodeAmount = nodeAmountAtHeight / int(threads)
@@ -351,6 +354,7 @@ func (mt *MerkleTree) HashValuesInMT(manualThreads int) {
 					}
 				}
 			}
+			sugar.Debugw("Inner nodes done.", "threadId", id)
 		}(i)
 	}
 	// waiting for threads to finish
@@ -512,7 +516,7 @@ func FileNameCreator(isCache bool, blockNr int) string {
 func FindMtHeight(elementAmount int) int {
 	currHeight := float64(1)
 	// mt has 2 ** (h - 1) leafs.
-	for smaller := true; smaller; smaller = int(math.Pow(2, currHeight)) < elementAmount {
+	for smaller := true; smaller; smaller = int(math.Pow(2, currHeight)) <= elementAmount {
 		currHeight++
 	}
 	// mt has (2 ** h) - 1 leafs and branches

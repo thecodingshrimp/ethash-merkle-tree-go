@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"go.uber.org/zap"
 )
 
 // func TestInitMerkleTree(t *testing.T) {
@@ -18,7 +19,8 @@ import (
 // }
 
 func TestMerkleProofValidation(t *testing.T) {
-	merkleTree := NewMerkleTree("./ethash-data", 30000, false, 16)
+	logger, _ := zap.NewDevelopment()
+	merkleTree := NewMerkleTree("./ethash-data", 30000, false, 0, logger)
 	index := 100
 	start := time.Now()
 	proof, err := merkleTree.GetProofByRaw64ByteElementIndex(index)
