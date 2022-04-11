@@ -131,25 +131,22 @@ func NewMerkleTree(dirPath string, blockNr int, isCache bool, threads int, logge
 	}
 
 	var elementAmount int
-	elementAmount = int((fileStats.Size() - 8) / hashBytes)
-
 	// elementAmount := int(1024 % fileStats.Size())
 	var height, leafAmount, nodeAmount int
 	if isCache {
-		height = FindMtHeight(elementAmount)
-		leafAmount = int(math.Pow(2, float64(height-1)))
-		nodeAmount = int(math.Pow(2, float64(height)) - 1)
+		elementAmount = int((fileStats.Size() - 8) / hashBytes)
 	} else {
-		height = FindMtHeight(elementAmount / (mixBytes / hashBytes))
-		leafAmount = int(math.Pow(2, float64(height-1)))
-		nodeAmount = int(math.Pow(2, float64(height)) - 1)
+		elementAmount = int(((fileStats.Size() - 8) / hashBytes) / (mixBytes / hashBytes))
 	}
+	height = FindMtHeight(elementAmount)
+	leafAmount = int(math.Pow(2, float64(height-1)))
+	nodeAmount = int(math.Pow(2, float64(height)) - 1)
 
 	// 3. creating elements array
 	// allocating space for elements in a 2D slice
-	elements := make([][]byte, elementAmount)
+	elements := make([][]byte, int((fileStats.Size()-8)/hashBytes))
 	var elementStorage []byte
-	elementStorage = make([]byte, elementAmount*hashBytes)
+	elementStorage = make([]byte, int((fileStats.Size() - 8)))
 
 	// filling elements array
 	fd, err := os.Open(filePath)
