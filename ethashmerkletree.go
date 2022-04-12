@@ -61,9 +61,8 @@ type MerkleProof struct {
 	// hasher function for validation function (if I try MiMC as well next to pedersen hash)
 }
 
-// MerkleProof currently only supports dataset item proofs
-func NewMerkleProof(values [2][]byte, indexes [2]int, proof [][]byte) *MerkleProof {
-	logger, _ := zap.NewProduction()
+// MerkleProof currently only supports dataset item proofs and not cache item proofs
+func NewMerkleProof(values [2][]byte, indexes [2]int, proof [][]byte, logger *zap.Logger) *MerkleProof {
 	return &MerkleProof{
 		Values:  values,
 		Indexes: indexes,
@@ -78,6 +77,9 @@ func (mp *MerkleProof) Validate(root []byte) bool {
 	if mp.Indexes[0]+1 != mp.Indexes[1] {
 		sugar.Error("Indexes are not consecutive.")
 		return false
+	} else if mp.Indexes[0]%2 != 0 {
+		sugar.Error("First index is not even.")
+		return false
 	}
 	first64bytesPoint, _ := pedersenHasher.PedersenHashBytes(mp.Values[0])
 	second64bytesPoint, _ := pedersenHasher.PedersenHashBytes(mp.Values[1])
@@ -88,9 +90,10 @@ func (mp *MerkleProof) Validate(root []byte) bool {
 		sugar.Errorw(err.Error())
 		return false
 	}
+	hashIndex := mp.Indexes[0] / 2
 	currHash := babyjub.Compress_Zokrates(currPoint)
 	for i := 0; i < len(mp.Proof); i++ {
-		currBit := mp.Indexes[0] >> i & 1
+		currBit := hashIndex >> i & 1
 		switch currBit {
 		case 1:
 			currPoint, err = pedersenHasher.PedersenHashBytes(mp.Proof[len(mp.Proof)-i-1], currHash[:])
@@ -130,9 +133,9 @@ func NewMerkleTree(dirPath string, blockNr int, isCache bool, threads int, logge
 		return &MerkleTree{}
 	}
 
-	var elementAmount int
-	// elementAmount := int(1024 % fileStats.Size())
+	// elementAmount := int(32 % fileStats.Size())
 	var height, leafAmount, nodeAmount int
+	var elementAmount int
 	if isCache {
 		elementAmount = int((fileStats.Size() - 8) / hashBytes)
 	} else {
@@ -257,6 +260,7 @@ func (mt *MerkleTree) HashValuesInMT(manualThreads int) {
 	percent := uint64(math.Ceil(float64(mt.NodeAmount) / 100))
 	for i := 0; i < int(threads); i++ {
 		go func(id int) {
+			// setup
 			sugar.Debugw("Starting thread", "id", id)
 			defer sugar.Debugw("Thread done.", "threadId", id)
 			defer pend.Done()
@@ -270,54 +274,39 @@ func (mt *MerkleTree) HashValuesInMT(manualThreads int) {
 			if limit > mt.NodeAmount {
 				limit = mt.NodeAmount
 			}
-			var hashIndex int
+			var raw64ByteElementIndex int
 			// todo outsource loop into its own function
-			sugar.Debugw("Starting walk through leafs", "thread_id", id, "first", first, "limit", limit)
+			sugar.Debugw("Starting walk through leafs", "thread_id", id, "first", first, "limit", limit, "batch", batch)
 			for i := first; i < limit; i++ {
-				if !mt.isCache {
+				if mt.isCache {
+					raw64ByteElementIndex = i % (mt.LeafAmount - 1)
+				} else {
 					// if not cache, i += 2 each iteration
 					// dataset holds 128bytes elements in 64bytes chunks
-					defer func() {
-						i++
-					}()
-
-					hashIndex = i / 2
-				} else {
-					hashIndex = i
+					raw64ByteElementIndex = (i % (mt.LeafAmount - 1)) * 2
 				}
 				currHash = NULL_HASH
-				if i < mt.LeafAmount+mt.ElementAmount-1 {
+				if raw64ByteElementIndex < len(mt.Raw64BytesDataElements) {
 					// hardcoded zokratesName. If really used, change to seedhash maybe
-					babyjubPoint, err := pedersenHasher.PedersenHashBytes(mt.Raw64BytesDataElements[i%(mt.LeafAmount-1)])
-					if err != nil {
-						sugar.Errorw(err.Error(), "threadId", id)
-						return
-					}
+					babyjubPoint, _ := pedersenHasher.PedersenHashBytes(mt.Raw64BytesDataElements[raw64ByteElementIndex])
 					if !mt.isCache {
 						// hashing 128bytes of data together in one leaf since mixbytes is 128 and is used as such in calculating mixhash
-						secondBabyjubPoint, err := pedersenHasher.PedersenHashBytes(mt.Raw64BytesDataElements[(i+1)%(mt.LeafAmount-1)])
-						if err != nil {
-							sugar.Errorw(err.Error(), "threadId", id)
-							return
-						}
+						secondBabyjubPoint, _ := pedersenHasher.PedersenHashBytes(mt.Raw64BytesDataElements[raw64ByteElementIndex+1])
 						first64bytesHash := babyjub.Compress_Zokrates(babyjubPoint)
 						second64bytesHash := babyjub.Compress_Zokrates(secondBabyjubPoint)
 						concatenatedHash := append(first64bytesHash[:], second64bytesHash[:]...)
-						babyjubPoint, err = pedersenHasher.PedersenHashBytes(concatenatedHash)
-						if err != nil {
-							sugar.Errorw(err.Error(), "threadId", id)
-							return
-						}
+						babyjubPoint, _ = pedersenHasher.PedersenHashBytes(concatenatedHash)
 					}
 					currHash = babyjub.Compress_Zokrates(babyjubPoint)
 				}
-				copy(mt.Hashes[hashIndex], currHash[:])
+				copy(mt.Hashes[i], currHash[:])
 
 				if status := atomic.AddUint64(&progress, 1); status%percent == 0 {
 					bar.Add(int(percent))
 				}
 			}
-			sugar.Debugw("Leafs done.", "threadId", id, "start", first, "finish", limit)
+			sugar.Debugw("Leafs done.", "threadId", id, "start", first, "finish", limit, "batch", batch)
+
 			// inside of the tree
 			var firstThreadNodeAtHeight, currNodeAmount, nodeAmountAtHeight int
 			var leftHash []byte
@@ -331,33 +320,29 @@ func (mt *MerkleTree) HashValuesInMT(manualThreads int) {
 				if heightLimit := firstThreadNodeAtHeight + nodeAmountAtHeight; limit > heightLimit {
 					limit = heightLimit
 				}
+				sugar.Debugw("Processing", "height", i, "threadId", id, "first", firstThreadNodeAtHeight, "limit", limit, "batch", limit-firstThreadNodeAtHeight)
 				for j := firstThreadNodeAtHeight; j < limit; j++ {
 					leftHash = mt.Hashes[j*2+1]
 					rightHash = mt.Hashes[j*2+2]
-					if !bytes.Equal(leftHash, NULL_HASH[:]) || !bytes.Equal(rightHash, NULL_HASH[:]) {
-						babyjubPoint, err := pedersenHasher.PedersenHashBytes(leftHash, rightHash)
-						if err != nil {
-							sugar.Errorw(err.Error(), "threadId", id)
-							return
-						}
-						currHash = babyjub.Compress_Zokrates(babyjubPoint)
-						copy(mt.Hashes[j], currHash[:])
-					} else {
-						// copy null hash without rehashing it.
-						copy(mt.Hashes[j], NULL_HASH[:])
+					babyjubPoint, err := pedersenHasher.PedersenHashBytes(leftHash, rightHash)
+					if err != nil {
+						sugar.Errorw(err.Error(), "threadId", id)
+						return
 					}
+					currHash = babyjub.Compress_Zokrates(babyjubPoint)
+					copy(mt.Hashes[j], currHash[:])
 					if status := atomic.AddUint64(&progress, 1); status%percent == 0 {
 						bar.Add(int(percent))
 					}
 				}
 			}
-			sugar.Debugw("Inner nodes done.", "threadId", id)
 		}(i)
 	}
 	// waiting for threads to finish
 	pend.Wait()
 	// hash the rest of the tree with main process.
 	// todo outsource redundant code to its own function
+	sugar.Debugw("Processing the rest of the tree.")
 	var currHash [32]byte
 	var leftHash []byte
 	var rightHash []byte
@@ -369,21 +354,17 @@ func (mt *MerkleTree) HashValuesInMT(manualThreads int) {
 		if heightLimit := nodeAmountAtHeight + nodeAmountAtHeight - 1; limit > heightLimit {
 			limit = heightLimit
 		}
+		sugar.Debugw("Processing", "height", i, "first", firstNodeAtHeight, "limit", limit, "batch", currNodeAmount)
 		for j := firstNodeAtHeight; j < limit; j++ {
 			leftHash = mt.Hashes[j*2+1]
 			rightHash = mt.Hashes[j*2+2]
-			if !bytes.Equal(leftHash, NULL_HASH[:]) || bytes.Equal(rightHash, NULL_HASH[:]) {
-				babyjubPoint, err := pedersenHasher.PedersenHashBytes(leftHash, rightHash)
-				if err != nil {
-					sugar.Errorw(err.Error())
-					return
-				}
-				currHash = babyjub.Compress_Zokrates(babyjubPoint)
-				copy(mt.Hashes[j], currHash[:])
-			} else {
-				// copy null hash without rehashing it.
-				copy(mt.Hashes[j], NULL_HASH[:])
+			babyjubPoint, err := pedersenHasher.PedersenHashBytes(leftHash, rightHash)
+			if err != nil {
+				sugar.Errorw(err.Error())
+				return
 			}
+			currHash = babyjub.Compress_Zokrates(babyjubPoint)
+			copy(mt.Hashes[j], currHash[:])
 			if status := atomic.AddUint64(&progress, 1); status%percent == 0 {
 				bar.Add(int(percent))
 			}
@@ -513,7 +494,7 @@ func FileNameCreator(isCache bool, blockNr int) string {
 func FindMtHeight(elementAmount int) int {
 	currHeight := float64(1)
 	// mt has 2 ** (h - 1) leafs.
-	for smaller := true; smaller; smaller = int(math.Pow(2, currHeight)) <= elementAmount {
+	for smaller := true; smaller; smaller = int(math.Pow(2, currHeight)) < elementAmount {
 		currHeight++
 	}
 	// mt has (2 ** h) - 1 leafs and branches
