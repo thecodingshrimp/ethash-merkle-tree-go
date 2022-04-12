@@ -103,7 +103,7 @@ func (mp *MerkleProof) Validate(root []byte) bool {
 		}
 		currHash = babyjub.Compress_Zokrates(currPoint)
 	}
-	return bytes.Compare(root, currHash[:]) == 0
+	return bytes.Equal(root, currHash[:])
 }
 
 func NewMerkleTree(dirPath string, blockNr int, isCache bool, threads int, logger *zap.Logger) *MerkleTree {
@@ -334,7 +334,7 @@ func (mt *MerkleTree) HashValuesInMT(manualThreads int) {
 				for j := firstThreadNodeAtHeight; j < limit; j++ {
 					leftHash = mt.Hashes[j*2+1]
 					rightHash = mt.Hashes[j*2+2]
-					if bytes.Compare(leftHash, NULL_HASH[:]) != 0 || bytes.Compare(rightHash, NULL_HASH[:]) != 0 {
+					if !bytes.Equal(leftHash, NULL_HASH[:]) || !bytes.Equal(rightHash, NULL_HASH[:]) {
 						babyjubPoint, err := pedersenHasher.PedersenHashBytes(leftHash, rightHash)
 						if err != nil {
 							sugar.Errorw(err.Error(), "threadId", id)
@@ -372,7 +372,7 @@ func (mt *MerkleTree) HashValuesInMT(manualThreads int) {
 		for j := firstNodeAtHeight; j < limit; j++ {
 			leftHash = mt.Hashes[j*2+1]
 			rightHash = mt.Hashes[j*2+2]
-			if bytes.Compare(leftHash, NULL_HASH[:]) != 0 || bytes.Compare(rightHash, NULL_HASH[:]) != 0 {
+			if !bytes.Equal(leftHash, NULL_HASH[:]) || bytes.Equal(rightHash, NULL_HASH[:]) {
 				babyjubPoint, err := pedersenHasher.PedersenHashBytes(leftHash, rightHash)
 				if err != nil {
 					sugar.Errorw(err.Error())
@@ -438,7 +438,7 @@ func (mt *MerkleTree) GetHashIndex(value []byte) int {
 // Get leaf hash value from element index in mt.Raw64BytesDataElements
 func (mt *MerkleTree) GetHashValueByRawElementIndex(raw64ByteElementIndex int) ([]byte, error) {
 	if (!mt.isCache && mt.NodeAmount <= int(raw64ByteElementIndex/2)+mt.LeafAmount-1) || (mt.isCache && mt.NodeAmount <= raw64ByteElementIndex+mt.LeafAmount-1) {
-		return nil, errors.New("index not in Hashes slices.")
+		return nil, errors.New("index not in Hashes slices")
 	}
 	if mt.isCache {
 		return mt.Hashes[raw64ByteElementIndex+mt.LeafAmount-1], nil
