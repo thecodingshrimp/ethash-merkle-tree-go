@@ -2,6 +2,7 @@ package ethashmerkletree
 
 import (
 	"bytes"
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -62,6 +63,7 @@ type MerkleProof struct {
 }
 
 // MerkleProof currently only supports dataset item proofs and not cache item proofs
+// Note: the dataset values have to be in LE format
 func NewMerkleProof(values [2][]byte, indexes [2]int, proof [][]byte, logger *zap.Logger) *MerkleProof {
 	return &MerkleProof{
 		Values:  values,
@@ -71,6 +73,7 @@ func NewMerkleProof(values [2][]byte, indexes [2]int, proof [][]byte, logger *za
 	}
 }
 
+// Validates a proof of a value in the merkle tree
 func (mp *MerkleProof) Validate(root []byte) bool {
 	pedersenHasher := pedersen.New(zokratesName, 171)
 	sugar := mp.logger.Sugar()
@@ -109,6 +112,10 @@ func (mp *MerkleProof) Validate(root []byte) bool {
 	return bytes.Equal(root, currHash[:])
 }
 
+// Create new merkle tree for epoch of given blockNr.
+// Note: This function expects the generated dataset through the function ethash.MakeDataset to be written to file in BE.
+// Values in leafs are LE and hashed as such for Dataset.
+// Values in Raw64BytesDataElements are LE for Dataset.
 func NewMerkleTree(dirPath string, blockNr int, isCache bool, threads int, logger *zap.Logger) *MerkleTree {
 	defer logger.Sync()
 	sugar := logger.Sugar()
@@ -168,6 +175,16 @@ func NewMerkleTree(dirPath string, blockNr int, isCache bool, threads int, logge
 	}
 	for i := range elements {
 		elements[i], elementStorage = elementStorage[:hashBytes], elementStorage[hashBytes:]
+	}
+	if !isCache {
+		sugar.Debugw("Converting datasetitems to uint32 LE...")
+		// converting element values from BE bytes to LE bytes
+		for i := range elements {
+			for j := 0; j < len(elements[i]); j += 4 {
+				binary.LittleEndian.PutUint32(elements[i][j:], binary.BigEndian.Uint32(elements[i][j:]))
+			}
+		}
+		sugar.Debugw("Done.")
 	}
 
 	// allocating space for hashes in a 2D slice
@@ -259,6 +276,7 @@ func (mt *MerkleTree) HashValuesInMT(manualThreads int) {
 	// Calculate the dataset segment
 	percent := uint64(math.Ceil(float64(mt.NodeAmount) / 100))
 	for i := 0; i < int(threads); i++ {
+		// todo: make all threads do one batch together
 		go func(id int) {
 			// setup
 			sugar.Debugw("Starting thread", "id", id)
